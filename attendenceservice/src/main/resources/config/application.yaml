@@ -1,0 +1,65 @@
+server:
+  port: ${PORT:8101}
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://eureka-service:8761/eureka
+  register-with-eureka: true
+spring:
+   application:
+    name: attendence-service
+   config:
+    import: optional:configserver:http://config-service:8888
+   kafka:
+    consumer:
+      bootstrap-servers: broker:9092
+      auto-offset-reset: latest
+      group-id: attendence-system-attendenceservice
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring:
+          json:
+            trusted:
+              packages: 'org.swipeinoutservice.entity'
+   jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+      show-sql: true
+   datasource:
+    url: jdbc:postgresql://host.docker.internal:5432/attendencedb
+    username: postgres
+    password: admin
+logging:
+  level:
+    root: INFO
+    org:
+      attendenceservice: DEBUG
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+kafka:
+  consumer:
+    topic: attendence_topic
+employee:
+  feign:
+    name: employees
+    url: http://swipe-service:8100
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  observations:
+    key-values:
+      application: attendence-service
+  tracing:
+    sampling:
+      probability: 1.0

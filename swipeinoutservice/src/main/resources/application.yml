@@ -1,0 +1,63 @@
+# See http://docs.spring.io/spring-boot/docs/current/reference/html/common-application-properties.html
+server:
+  port: ${PORT:8100}
+spring:
+  application:
+    name: swipeinout-service
+  config:
+    import: optional:configserver:http://config-service:8888
+  kafka:
+    producer:
+      bootstrap-servers: broker:9092
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+  jpa:
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+      show-sql: true
+  datasource:
+    url: jdbc:postgresql://host.docker.internal:5432/swipeeventdb
+    username: postgres
+    password: admin
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://auth-service:8000
+          jwk-set-uri: http://auth-service:8000/oauth2/jwks
+logging:
+  level:
+    root: INFO
+    org:
+      swipeinoutservice: DEBUG
+      springframwork:
+        security:
+          oauth2: TRACE
+  pattern:
+    correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://eureka-service:8761/eureka
+  register-with-eureka: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  observations:
+    key-values:
+      application: swipeinout-service
+  tracing:
+    sampling:
+      probability: 1.0
+swipeinout-service:
+  noOfMins: 60
+  topicName: attendence_topic 

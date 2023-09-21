@@ -1,0 +1,187 @@
+version: "3.8"
+services:
+#### Observability in Spring 3- Configuration Start ######
+  loki:
+    container_name: loki
+    image: grafana/loki:main
+    command: [ "-config.file=/etc/loki/local-config.yaml" ]
+    ports:
+      - "3100:3100"
+    networks:
+      - attendence-service-network
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:v2.46.0
+    command:
+      - --enable-feature=exemplar-storage
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+    - "9090:9090"
+    networks:
+      - attendence-service-network
+  tempo:
+    container_name: tempo
+    image: grafana/tempo:2.2.2
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./docker/tempo/tempo.yml:/etc/tempo.yaml:ro
+      - ./docker/tempo/tempo-data:/tmp/tempo
+    ports:
+      - "3110:3100"  # Tempo
+      - "9411:9411" # zipkin
+    networks:
+      - attendence-service-network
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:10.1.0
+    volumes:
+      - ./docker/grafana:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    ports:
+      - "3000:3000"
+    networks:
+      - attendence-service-network
+#### Observability in Spring 3- Configuration End######
+
+
+#### Kafka Configuration Start######
+  zookeeper:
+    restart: always
+    image: confluentinc/cp-zookeeper
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - 2181:2181
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - ./sb3-kafka/zookeeper/data:/data
+      - ./sb3-kafka/zookeeper/datalog:/datalog
+    networks:
+      - attendence-service-network
+  broker:
+    image: confluentinc/cp-kafka
+    hostname: broker
+    container_name: broker
+    depends_on:
+      - zookeeper
+    ports:
+      - 9092:9092
+      - 29092:29092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_ADVERTISED_HOST_NAME: broker
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: broker:9092
+      CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper:2181
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      GROUP_ID: "attendence-system-attendenceservice"
+      KAFKA_CREATE_TOPICS: "attendence-topic"
+    volumes:
+      - ./sb3-kafka/kafka1/data:/var/lib/kafka/data
+    networks:
+      - attendence-service-network
+  manager:
+    image: sheepkiller/kafka-manager
+    ports:
+      - 9000:9000
+    environment:
+      ZK_HOSTS: zookeeper:2181
+    depends_on:
+      - zookeeper
+    networks:
+      - attendence-service-network
+#### Kafka Configuration End######
+
+#### Spring boot 3 servcies Start######
+  eureka-service:
+    container_name: eureka-service
+    build:
+      context: eureka-service
+      dockerfile: Dockerfile
+    image: eureka-service:0.0.1
+    ports:
+      - 8761:8761
+    networks:
+      - attendence-service-network
+  config-service:
+    container_name: config-service
+    build:
+      context: spring-cloud-config-service
+      dockerfile: Dockerfile
+    image: config-service:0.0.1
+    environment:
+      - eureka.client.serviceUrl.defaultZone=http://eureka-service:8761/eureka/
+      - management.zipkin.tracing.endpoint=tempo:9411
+    ports:
+      - 8888:8888
+    depends_on:
+      - eureka-service
+    networks:
+      - attendence-service-network
+  auth-service:
+    container_name: auth-service
+    build:
+      context: authserver
+      dockerfile: Dockerfile
+    image: auth-service:0.0.1
+    environment:
+      - eureka.client.serviceUrl.defaultZone=http://eureka-service:8761/eureka/
+      - management.zipkin.tracing.endpoint=tempo:9411
+    ports:
+      - 8000:8000
+    depends_on:
+      - eureka-service
+    networks:
+      - attendence-service-network
+  swipe-service:
+    container_name: swipe-service
+    build:
+      context: swipeinoutservice
+      dockerfile: Dockerfile
+    image: swipe-service:0.0.1
+    environment:
+      - eureka.client.serviceUrl.defaultZone=http://eureka-service:8761/eureka/
+      - management.zipkin.tracing.endpoint=tempo:9411
+    ports:
+      - 8100:8100
+    depends_on:
+      - eureka-service
+      - config-service
+      - auth-service
+      - zookeeper
+    networks:
+      - attendence-service-network
+  attendence-service:
+    container_name: attendence-service
+    build:
+      context: attendenceservice
+      dockerfile: Dockerfile
+    image: attendence-service:0.0.1
+    environment:
+      - eureka.client.serviceUrl.defaultZone=http://eureka-service:8761/eureka/
+      - management.zipkin.tracing.endpoint=tempo:9411
+    ports:
+      - 8101:8101
+    depends_on:
+      - eureka-service
+      - config-service
+      - zookeeper
+    networks:
+      - attendence-service-network
+#### Spring boot 3 servcies End######
+networks:
+  attendence-service-network:
+    driver: bridge
